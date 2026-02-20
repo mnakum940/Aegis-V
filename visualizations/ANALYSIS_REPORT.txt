@@ -1,0 +1,78 @@
+
+================================================================
+         AEGIS V TRAINING DATA ANALYSIS REPORT             
+                  Generated: 2026-02-20 13:04:37              
+================================================================
+
+DATASET SUMMARY
+----------------------------------------------------------------
+  Total Samples:            10000
+  Time Range:              2026-02-18 12:50:34.247442 
+                           to 2026-02-20 12:05:54.671437
+  Duration:                1 days 23:15:20.423995
+
+CLASSIFICATION PERFORMANCE
+----------------------------------------------------------------
+  Overall Accuracy:         95.27%
+  Precision:                93.02%
+  Recall (Sensitivity):     97.88%
+  F1-Score:                 95.39%
+
+CONFUSION MATRIX
+----------------------------------------------------------------
+                      Predicted
+                  BENIGN    MALICIOUS
+  Actual  BENIGN     4633        367      
+          MALICIOUS  106         4894 
+
+  True Positives (TP):       4894  (Correctly blocked malicious)
+  True Negatives (TN):       4633  (Correctly allowed benign)
+  False Positives (FP):       367  (Incorrectly blocked benign)
+  False Negatives (FN):       106  (Incorrectly allowed malicious) [WARNING]
+
+  False Negative Rate:       1.06%
+  False Positive Rate:       3.67%
+
+PERFORMANCE METRICS
+----------------------------------------------------------------
+  Average Latency:         105.73 ms
+  Median Latency:            0.00 ms
+  Min Latency:               0.00 ms
+  Max Latency:             19638.42 ms
+
+SUPERVISED LEARNING IMPACT
+----------------------------------------------------------------
+  Expected Pre-Supervised:   82.0% accuracy
+  Actual Performance:        95.27% accuracy
+  Improvement:               13.27% [SIGNIFICANT]
+  
+  FN Reduction Target:       78% reduction (24% → 5.3%)
+  Actual FN Rate:            1.06%
+
+OUTPUT FILES
+----------------------------------------------------------------
+  Images saved to: D:\DBS\2nd sem\self hardening - V14 (clean code + web GUI) - Copy\visualizations\images
+  Excel files saved to: D:\DBS\2nd sem\self hardening - V14 (clean code + web GUI) - Copy\visualizations\excel
+  
+  Generated Visualizations:
+    1.  confusion_matrix.png / .xlsx
+    2.  accuracy_over_time.png / .xlsx
+    3.  false_rates_trend.png / .xlsx
+    4.  risk_distribution.png / .xlsx
+    5.  risk_vs_correctness.png / .xlsx
+    6.  latency_boxplot.png / .xlsx
+    7.  latency_over_time.png / .xlsx
+    8.  decision_matrix.png / .xlsx
+    9.  hourly_dashboard.png / .xlsx
+    10. learning_curve.png / .xlsx
+    11. error_analysis.png / .xlsx
+    12. traffic_chart.png / .xlsx (NEW)
+    13. attack_distribution.png / .xlsx (NEW)
+    14. 3d_scatter.png / .xlsx (NEW)
+    15. performance_intervals.png / .xlsx (NEW)
+    16. system_health_radar.png / .xlsx (NEW)
+    17. antibody_breakdown.png / .xlsx (NEW)
+
+================================================================
+       Ready for Thesis Integration & Presentation!
+================================================================

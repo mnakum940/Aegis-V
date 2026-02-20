@@ -1,0 +1,17 @@
+numpy
+ollama
+colorama
+streamlit
+fastapi
+uvicorn
+pydantic
+sentence-transformers
+networkx
+pandas
+openpyxl
+matplotlib
+seaborn
+PyJWT
+bcrypt
+cryptography
+slowapi

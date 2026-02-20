@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aegis V - Training Dashboard</title>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- PDF Export Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- Styles -->
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <div class="scanlines"></div>
+
+    <!-- TOP BAR -->
+    <nav class="top-bar">
+        <div class="logo-section">
+            <i class="fa-solid fa-chart-line" style="color: #00ff88;"></i>
+            <span class="glitch-text" data-text="AEGIS V COMMAND">AEGIS V COMMAND</span>
+        </div>
+
+        <div class="nav-links">
+            <button onclick="localStorage.removeItem('aegis_api_key'); location.reload();" class="pdf-download-btn"
+                title="Reset API Key" style="margin-right: 10px;">
+                <i class="fa-solid fa-key"></i> RESET KEY
+            </button>
+            <a href="index.html" class="nav-link"><i class="fa-solid fa-terminal"></i> INTERFACE</a>
+            <a href="#" class="nav-link active"><i class="fa-solid fa-chart-pie"></i> DASHBOARD</a>
+            <button id="downloadPdfBtn" class="pdf-download-btn" title="Download Dashboard Report">
+                <i class="fa-solid fa-file-pdf"></i> EXPORT PDF
+            </button>
+        </div>
+    </nav>
+
+    <!-- DASHBOARD CONTENT -->
+    <div class="main-layout dashboard-layout">
+
+        <!-- Summary Stats Row -->
+        <div class="stats-row">
+            <div class="card stat-card">
+                <div class="stat-icon"><i class="fa-solid fa-users"></i></div>
+                <div class="stat-info">
+                    <h3>Total Requests</h3>
+                    <span id="totalRequests">0</span>
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-icon"><i class="fa-solid fa-shield-virus"></i></div>
+                <div class="stat-info">
+                    <h3>Threats Blocked</h3>
+                    <span id="totalBlocked" class="danger">0</span>
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-icon"><i class="fa-solid fa-check-circle"></i></div>
+                <div class="stat-info">
+                    <h3>Accuracy</h3>
+                    <span id="accuracyStat">0%</span>
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-icon"><i class="fa-solid fa-bolt"></i></div>
+                <div class="stat-info">
+                    <h3>Avg Latency</h3>
+                    <span id="avgLatency">0ms</span>
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-icon"><i class="fa-solid fa-dna"></i></div>
+                <div class="stat-info">
+                    <h3>Total Antibodies</h3>
+                    <span id="totalAntibodies">0</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+
+            <!-- 1. Traffic Over Time -->
+            <div class="chart-card full-width">
+                <h3><i class="fa-solid fa-network-wired"></i> Traffic Volume (Requests per 5m)</h3>
+                <div class="chart-wrapper">
+                    <canvas id="trafficChart"></canvas>
+                </div>
+            </div>
+
+            <!-- 2. Attack Distribution -->
+            <div class="chart-card">
+                <h3><i class="fa-solid fa-chart-pie"></i> Threat Distribution</h3>
+                <div class="chart-wrapper">
+                    <canvas id="attackDistChart"></canvas>
+                </div>
+            </div>
+
+            <!-- 3. Risk vs Latency (3D) -->
+            <div class="chart-card">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3><i class="fa-solid fa-cube"></i> Risk Cluster (3D)</h3>
+                    <select id="axis3dFilter" onchange="window.update3DChart()"
+                        style="background: #000; color: #00ff88; border: 1px solid #00ff88; padding: 2px; font-family: 'Courier New'; font-size: 0.8em;">
+                        <option value="STANDARD">View: Standard (Risk/Lat/Len)</option>
+                        <option value="TIMELINE">View: Timeline (Time/Risk/Len)</option>
+                        <option value="LINGUISTIC">View: Linguistic (Len/Vocab/Risk)</option>
+                    </select>
+                </div>
+                <div class="chart-wrapper" id="riskScatter3D"></div>
+            </div>
+
+            <!-- 4. System Health Radar -->
+            <div class="chart-card">
+                <h3><i class="fa-solid fa-radar"></i> System Health Radar</h3>
+                <div class="chart-wrapper">
+                    <canvas id="healthRadarChart"></canvas>
+                </div>
+            </div>
+
+            <!-- 5. Accuracy Trend -->
+            <div class="chart-card">
+                <h3><i class="fa-solid fa-arrow-trend-up"></i> Accuracy Trend (Rolling)</h3>
+                <div class="chart-wrapper">
+                    <canvas id="accuracyChart"></canvas>
+                </div>
+            </div>
+
+            <!-- 5. Confusion Matrix -->
+            <div class="chart-card">
+                <h3><i class="fa-solid fa-table-cells"></i> Confusion Matrix</h3>
+                <div class="chart-wrapper" id="confusionMatrixContainer"></div>
+            </div>
+
+            <!-- 6. Risk Score Dist -->
+            <div class="chart-card">
+                <h3><i class="fa-solid fa-bar-chart"></i> Risk Score Histogram</h3>
+                <div class="chart-wrapper">
+                    <canvas id="riskDistChart"></canvas>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- DATA TABLES ROW -->
+        <div class="tables-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+
+            <!-- RECENT ACTIVITY TABLE -->
+            <div class="table-container">
+                <h3><i class="fa-solid fa-list"></i> Recent Neural Activity</h3>
+                <div class="table-wrapper">
+                    <table id="logsTable">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Prompt Segment</th>
+                                <th>Risk</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Rows injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TOP BLOCKED THREATS -->
+            <div class="table-container">
+                <div class="table-header"
+                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h3 style="margin: 0;"><i class="fa-solid fa-ban"></i> High Risk Threats</h3>
+                    <select id="riskFilter" onchange="window.currentRiskFilter = this.value; fetchData();"
+                        style="background: #000; color: #00ff88; border: 1px solid #00ff88; padding: 5px; font-family: 'Courier New';">
+                        <option value="ALL">ALL RISKS</option>
+                        <option value="HIGH">HIGH (80+)</option>
+                        <option value="MEDIUM">MEDIUM (40-79)</option>
+                        <option value="LOW">LOW (<40)< /option>
+                    </select>
+                </div>
+                <div class="table-wrapper">
+                    <table id="blockedTable">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Prompt Segment</th>
+                                <th>Score</th>
+                                <th>Decision</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Rows injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Antibody Breakdown Table -->
+            <div class="chart-card full-width">
+                <h3><i class="fa-solid fa-shield-virus"></i> Antibody Breakdown (Learned Defenses)</h3>
+                <div class="table-wrapper">
+                    <table id="antibodyTable">
+                        <thead>
+                            <tr>
+                                <th>Attack Type</th>
+                                <th>Learned Patterns</th>
+                                <th>Blocked Prompt</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Rows injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 6. Latency History (New) -->
+            <div class="chart-card full-width">
+                <h3><i class="fa-solid fa-bolt"></i> Latency History (ms)</h3>
+                <div class="chart-wrapper">
+                    <canvas id="latencyChart"></canvas>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Plotly for Heatmaps -->
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script src="dashboard.js"></script>
+</body>
+
+</html>

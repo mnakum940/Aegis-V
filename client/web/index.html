@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aegis V - Neural Interface</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- Chart.js for Boiling Frog Graph -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script> <!-- Markdown Support -->
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <div class="scanlines"></div>
+
+    <!-- TOP BAR: Status & Graph -->
+    <nav class="top-bar">
+        <div class="logo-section">
+            <i class="fa-solid fa-shield-halved fa-beat-fade" style="color: #00ff88; --fa-animation-duration: 2s;"></i>
+            <span class="glitch-text" data-text="AEGIS V">AEGIS V</span>
+            <span class="system-status">SYSTEM ONLINE</span>
+        </div>
+
+        <!-- BOILING FROG GRAPH CONTAINER -->
+        <div class="graph-container">
+            <canvas id="boilingFrogChart"></canvas>
+        </div>
+
+        <div style="margin-left: 20px;">
+            <button onclick="localStorage.removeItem('aegis_api_key'); location.reload();"
+                style="background: transparent; color: #00ff88; border: 1px solid #00ff88; padding: 5px 10px; border-radius: 4px; font-family: 'Courier New', monospace; cursor: pointer; margin-right: 10px;">
+                <i class="fa-solid fa-key"></i> API KEY
+            </button>
+            <a href="dashboard.html"
+                style="color: #00ff88; text-decoration: none; border: 1px solid #00ff88; padding: 5px 10px; border-radius: 4px; font-family: 'Courier New', monospace;">
+                <i class="fa-solid fa-chart-pie"></i> DASHBOARD
+            </a>
+        </div>
+    </nav>
+
+    <div class="main-layout">
+        <!-- SIDEBAR: Telemetry -->
+        <aside class="sidebar">
+            <div class="telemetry-card">
+                <h3><i class="fa-solid fa-dna"></i> ANTIBODIES</h3>
+                <div class="stat-value" id="antibody-count">--</div>
+                <div class="stat-label">TOTAL DEFENSES</div>
+            </div>
+
+            <div class="telemetry-card">
+                <h3><i class="fa-solid fa-brain"></i> COGNITION</h3>
+                <div class="stat-row">
+                    <span>L1 Distance:</span>
+                    <span id="l1-dist" class="mono">0.000</span>
+                </div>
+                <div class="stat-row">
+                    <span>L2 Risk:</span>
+                    <span id="l2-risk" class="mono risk-low">0/100</span>
+                </div>
+            </div>
+
+            <div class="telemetry-card">
+                <h3><i class="fa-solid fa-link"></i> BLOCKCHAIN</h3>
+                <div class="stat-row">
+                    <span>Blocks:</span>
+                    <span id="chain-len" class="mono">--</span>
+                </div>
+                <div class="stat-row">
+                    <span>Hash:</span>
+                    <span id="last-hash" class="mono tiny-text">0x...</span>
+                </div>
+            </div>
+
+            <button id="reset-btn" class="cyber-btn">
+                <i class="fa-solid fa-power-off"></i> SYSTEM RESET
+            </button>
+        </aside>
+
+        <!-- CHAT AREA -->
+        <main class="chat-container">
+            <div id="chat-history" class="chat-history">
+                <!-- Welcome Message -->
+                <div class="message assistant">
+                    <div class="avatar"><i class="fa-solid fa-shield-cat"></i></div>
+                    <div class="content">
+                        Aegis V Neural Interface Initialized.<br>
+                        Defensive protocols active. Monitoring for Boiling Frog attacks.
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <textarea id="user-input" placeholder="Enter command or query..." rows="1"></textarea>
+                    <button id="send-btn"><i class="fa-solid fa-paper-plane"></i></button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

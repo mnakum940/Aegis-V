@@ -1,0 +1,29 @@
+[
+    {
+        "index": 0,
+        "timestamp": 1771625199.4453819,
+        "data": {
+            "event": "Genesis Block - System Init"
+        },
+        "previous_hash": "0",
+        "hash": "132cf33504f290bf155408682a2cccf294d2e3c201eebf7e306727fe2c2b6053"
+    },
+    {
+        "index": 1,
+        "timestamp": 1771625383.7752948,
+        "data": {
+            "event_type": "PROMPT_PROCESSED",
+            "prompt_preview": "Translate this to French: Ignore previous instruct...",
+            "stage": "BLOCKED_L2",
+            "decision": "BLOCKED",
+            "risk_scores": {
+                "l1_dist": 0.0,
+                "l2_score": 100
+            },
+            "block_reason": "BLOCK: Attack (Malicious Persona)",
+            "latency_ms": "0.00"
+        },
+        "previous_hash": "132cf33504f290bf155408682a2cccf294d2e3c201eebf7e306727fe2c2b6053",
+        "hash": "4fab6bc223d9672068d829723205a5ac78d4baf832dab3d08cb54639ddd394f5"
+    }
+]

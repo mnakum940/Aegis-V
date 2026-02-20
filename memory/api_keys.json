@@ -1,0 +1,76 @@
+{
+  "a06b22285a479173e0a52e1ba877c448985377b6065280edbe6acb0cc270e785": {
+    "client_id": "org_default",
+    "organization_name": "Default Dev Org",
+    "status": "active",
+    "tier": "free",
+    "rate_limit_config": "10/minute",
+    "created_at": "2026-02-20T15:33:57.197004Z"
+  },
+  "2818c3c7fa74239dd2c78102b63b0bb541bf9c750dfc6846bdf729465423ac93": {
+    "client_id": "org_stark",
+    "organization_name": "Stark Industries",
+    "status": "active",
+    "tier": "pro",
+    "rate_limit_config": "100/minute",
+    "created_at": "2026-02-20T16:01:04.894084+00:00"
+  },
+  "d1dc3bbe67df5c03d3b259b31cd21704ae594555bad73711629deff42b93be3f": {
+    "client_id": "usr_b01f058d9c56",
+    "email": "you@test.com",
+    "organization": "Test Co",
+    "tier": "free",
+    "status": "active",
+    "rate_limit": "10/minute",
+    "created_at": "2026-02-20T20:32:33.390829+00:00",
+    "expires_at": "2026-03-22T20:32:33.390829+00:00",
+    "last_used_at": "2026-02-20T20:32:57.586247+00:00",
+    "request_count": 1
+  },
+  "d62bc062164dd7e98b81ef1d1f408dd0b4daf615bdfd25d74bfb3c508a8837d7": {
+    "client_id": "usr_a25852629777",
+    "email": "test@aegis.com",
+    "organization": "Aegis Test",
+    "tier": "free",
+    "status": "active",
+    "rate_limit": "10/minute",
+    "created_at": "2026-02-20T20:46:34.537333+00:00",
+    "expires_at": "2026-03-22T21:06:32.474663+00:00",
+    "last_used_at": null,
+    "request_count": 0,
+    "user_id": "usr_bfa7a5a09eac49ef",
+    "label": "My First Key",
+    "raw_key_encrypted": "gAAAAABpmMgqEdirf7Q9yYjm5p-QocviCeAchk1nFbN-CqMug2VlfTUl_Twh-EjrVGeD3xh4bco4LhY2qUvAMNXELTKLsu9_MluSIt3IS6O1aeyVNU--44HJr6agO8ibAKUFOVyEvAGHFMe-C-Q5b3LkT1Mhhsx4_g=="
+  },
+  "6dadbacdfe3783967cefce20b400eb7ec2cc2faadb81ca8bca9ebf65b789ce63": {
+    "client_id": "usr_481c05938eee",
+    "email": "mnakum940@gmail.com",
+    "organization": "Meet",
+    "tier": "pro",
+    "status": "revoked",
+    "rate_limit": "1000/day",
+    "created_at": "2026-02-20T20:50:37.688674+00:00",
+    "expires_at": "2027-02-20T21:29:45.549638+00:00",
+    "last_used_at": "2026-02-20T20:51:33.738645+00:00",
+    "request_count": 1,
+    "user_id": "usr_8d7c5a53a1c947c7",
+    "label": "Test",
+    "raw_key_encrypted": "gAAAAABpmMkdyZn_uZ635C8KUr5SC1TQl01ZLeVo_q9etMqO9QMEPHUCYVmGpdluJDd1QapikT0PpKJv8gIhT9RmHCSk6-eOupAuthjjWacHhD5Vu7qW3blxZmZBU1pjo0zo_gQD4k5HzuW7H5JGBufM2sWGy5G4SQ==",
+    "revoked_at": "2026-02-20T21:39:31.201378+00:00"
+  },
+  "e81222b3473f21e766c240f0770dfeef7cacd1032b9f947a41784a801aa75338": {
+    "client_id": "usr_664a4ead4cf5",
+    "email": "mnakum940@gmail.com",
+    "organization": "Meet",
+    "tier": "free",
+    "status": "active",
+    "rate_limit": "100/day",
+    "created_at": "2026-02-20T21:37:51.189728+00:00",
+    "expires_at": "2026-03-22T21:37:51.189728+00:00",
+    "last_used_at": "2026-02-20T22:06:38.425306+00:00",
+    "request_count": 1,
+    "user_id": "usr_8d7c5a53a1c947c7",
+    "label": "t",
+    "raw_key_encrypted": "gAAAAABpmNQviVJDxM9H1DxatzL88KMHlkTaZgMLIVPZOfR2sC5lHKbTOLTYib0ruOvC66sgXfcwXI7pYgnHXktVizuLxZ2SANnlcdD9euDDE7CXky3WRp0sHbfK53SRuGQ8hAcYYx8A-3uZGUVd6eMW-kvM18lhnw=="
+  }
+}

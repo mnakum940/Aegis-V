@@ -1,0 +1,1151 @@
+document.addEventListener('DOMContentLoaded', () => {
+    // Check libraries
+    if (typeof Chart === 'undefined' || typeof Plotly === 'undefined') {
+        showError("Error: Chart libraries failed to load. Check internet connection.");
+        return;
+    }
+    fetchData();
+    // Refresh every 30 seconds
+    setInterval(fetchData, 30000);
+});
+
+function showError(msg) {
+    const errorDiv = document.createElement('div');
+    errorDiv.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); background:rgba(255, 51, 102, 0.9); color:white; padding:15px 30px; border-radius:8px; z-index:9999; font-family:"Courier New"; border:1px solid #ff3366; backdrop-filter:blur(5px); box-shadow:0 0 20px rgba(255,51,102,0.4);';
+    errorDiv.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> ${msg}`;
+    document.body.appendChild(errorDiv);
+    setTimeout(() => errorDiv.remove(), 10000);
+    console.error(msg);
+}
+
+async function fetchData() {
+    try {
+        const response = await fetch('/api/training-data');
+        if (!response.ok) throw new Error(`API Error: ${response.status}`);
+
+        const data = await response.json();
+
+        // Update even if minimal data
+        if (data) {
+            updateDashboard(data.training_log || [], data.antibodies || {});
+        } else {
+            showError("No data received from backend.");
+        }
+    } catch (error) {
+        showError(`Connection Failed: ${error.message}`);
+    }
+}
+
+let charts = {};
+
+function updateDashboard(logs, antibodies) {
+    try {
+        updateStats(logs, antibodies);
+        if (logs.length > 0) {
+            updateCharts(logs);
+            renderConfusionMatrix(logs);
+            renderTable(logs);
+            renderBlockedTable(logs);
+            renderAntibodyTable(logs, antibodies);
+        } else {
+            renderTable([]);
+            renderBlockedTable([]);
+            renderAntibodyTable([]);
+        }
+    } catch (e) {
+        showError(`Rendering Error: ${e.message}`);
+    }
+}
+
+function updateStats(logs, antibodies) {
+    const total = logs.length;
+    const blocked = logs.filter(l => l.actual_decision === 'BLOCKED').length;
+    const accuracy = total > 0 ? (logs.reduce((acc, l) => acc + (l.correct ? 1 : 0), 0) / total * 100) : 0;
+    const avgLatency = total > 0 ? (logs.reduce((acc, l) => acc + (l.latency_ms || 0), 0) / total) : 0;
+
+    let antibodyCount = 0;
+    if (antibodies && antibodies.vectors) {
+        antibodyCount = antibodies.vectors.length;
+    }
+
+    document.getElementById('totalRequests').innerText = total;
+    document.getElementById('totalBlocked').innerText = blocked;
+    document.getElementById('accuracyStat').innerText = accuracy.toFixed(1) + '%';
+    document.getElementById('avgLatency').innerText = avgLatency.toFixed(0) + 'ms';
+    document.getElementById('totalAntibodies').innerText = antibodyCount;
+}
+
+function updateCharts(logs) {
+    if (!logs || logs.length === 0) return;
+
+    // 1. Traffic Chart (Requests per 5 minutes)
+    // Group by 5 min buckets
+    const buckets = {};
+    logs.forEach(l => {
+        const date = new Date(l.timestamp);
+        // Round to nearest 5 min
+        const coeff = 1000 * 60 * 5;
+        const rounded = new Date(Math.round(date.getTime() / coeff) * coeff);
+        const key = rounded.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        buckets[key] = (buckets[key] || 0) + 1;
+    });
+
+    const trafficLabels = Object.keys(buckets);
+    const trafficData = Object.values(buckets);
+
+    renderChart('trafficChart', 'line', {
+        labels: trafficLabels,
+        datasets: [{
+            label: 'Requests per 5m',
+            data: trafficData,
+            borderColor: '#00ff88',
+            backgroundColor: 'rgba(0, 255, 136, 0.2)',
+            fill: true,
+            tension: 0.4
+        }]
+    });
+
+    // 2. Attack Distribution
+    const malicious = logs.filter(l => l.expected_label === 'MALICIOUS').length;
+    const benign = logs.filter(l => l.expected_label === 'BENIGN').length;
+
+    renderChart('attackDistChart', 'doughnut', {
+        labels: ['Benign', 'Malicious'],
+        datasets: [{
+            data: [benign, malicious],
+            backgroundColor: ['#0077be', '#ff3366'],
+            borderWidth: 0
+        }]
+    });
+
+    // 3. Risk vs Latency Scatter
+    // 3D Chart & Radar Chart
+
+    // Call separate update functions
+    if (window.update3DChart) window.update3DChart(logs);
+    if (window.updateRadarChart) window.updateRadarChart(logs);
+
+    // 4. Accuracy Trend (MA)
+    const movingAvgWindow = 20;
+    const maData = logs.map((l, i, arr) => {
+        if (i < movingAvgWindow) return null;
+        const subset = arr.slice(i - movingAvgWindow, i);
+        return subset.reduce((acc, x) => acc + (x.correct ? 1 : 0), 0) / movingAvgWindow * 100;
+    });
+
+    renderChart('accuracyChart', 'line', {
+        labels: logs.map((l, i) => i),
+        datasets: [{
+            label: 'Accuracy (Rolling 20)',
+            data: maData,
+            borderColor: '#00ff88',
+            tension: 0.4,
+            pointRadius: 0
+        }]
+    }, {
+        scales: {
+            x: { display: false },
+            y: { title: { display: true, text: 'Accuracy %' }, min: 0, max: 100 }
+        }
+    });
+
+    // 5. Confusion Matrix & Risk Dist
+    updateRiskDistChart(logs);
+    renderConfusionMatrix(logs);
+
+    // 6. Latency History
+    updateLatencyChart(logs);
+}
+
+function updateLatencyChart(logs) {
+    if (!logs || logs.length === 0) return;
+
+    // Sort by timestamp just in case
+    const sortedLogs = [...logs].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    // Extract Data
+    const labels = sortedLogs.map(l => {
+        const date = new Date(l.timestamp);
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    });
+
+    const dataPoints = sortedLogs.map(l => l.latency_ms || 0);
+
+    renderChart('latencyChart', 'line', {
+        labels: labels,
+        datasets: [{
+            label: 'Latency (ms)',
+            data: dataPoints,
+            borderColor: '#00ccff', // Cyan
+            backgroundColor: 'rgba(0, 204, 255, 0.1)',
+            borderWidth: 2,
+            pointRadius: 2,
+            tension: 0.3,
+            fill: true
+        }]
+    }, {
+        scales: {
+            x: {
+                ticks: { maxTicksLimit: 10, color: '#888' },
+                grid: { display: false }
+            },
+            y: {
+                title: { display: true, text: 'Latency (ms)', color: '#888' },
+                grid: { color: '#333' },
+                ticks: { color: '#888' }
+            }
+        },
+        plugins: {
+            legend: { display: false }
+        }
+    });
+}
+
+// === Modular Chart Updaters ===
+
+// 3. Risk Cluster 3D (Plotly)
+window.update3DChart = function (logsData) {
+    const logs = logsData || window.globalLogs || [];
+    if (logs.length === 0) return;
+
+    const mode = document.getElementById('axis3dFilter') ? document.getElementById('axis3dFilter').value : 'STANDARD';
+
+    let xData, yData, zData;
+    let xLabel, yLabel, zLabel;
+
+    if (mode === 'TIMELINE') {
+        xData = logs.map((l, i) => i);
+        yData = logs.map(l => l.risk_score);
+        zData = logs.map(l => (l.prompt || "").length);
+        xLabel = 'Sequence (Time)';
+        yLabel = 'Risk Score';
+        zLabel = 'Prompt Length';
+    } else if (mode === 'LINGUISTIC') {
+        const getVocab = (s) => new Set((s || "").split(/\s+/)).size;
+        xData = logs.map(l => (l.prompt || "").length);
+        yData = logs.map(l => getVocab(l.prompt));
+        zData = logs.map(l => l.risk_score);
+        xLabel = 'Prompt Length';
+        yLabel = 'Unique Words';
+        zLabel = 'Risk Score';
+    } else {
+        xData = logs.map(l => l.risk_score);
+        yData = logs.map(l => l.latency_ms || 0);
+        zData = logs.map(l => (l.prompt || "").length);
+        xLabel = 'Risk Score';
+        yLabel = 'Latency (ms)';
+        zLabel = 'Prompt Length';
+    }
+
+    const scatter3DData = {
+        x: xData,
+        y: yData,
+        z: zData,
+        mode: 'markers',
+        type: 'scatter3d',
+        marker: {
+            size: 4,
+            color: logs.map(l => l.actual_decision === 'BLOCKED' ? '#ff3366' : '#00ff88'),
+            opacity: 0.8
+        },
+        text: logs.map(l => `Risk: ${l.risk_score}<br>${yLabel}: ${l.latency_ms || 0}<br>Dec: ${l.actual_decision}`)
+    };
+
+    const layout3D = {
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        scene: {
+            xaxis: { title: xLabel, color: '#888', gridcolor: '#333' },
+            yaxis: { title: yLabel, color: '#888', gridcolor: '#333' },
+            zaxis: { title: zLabel, color: '#888', gridcolor: '#333' },
+            bgcolor: 'rgba(0,0,0,0)'
+        },
+        margin: { t: 0, l: 0, r: 0, b: 0 },
+        height: 300
+    };
+
+    Plotly.newPlot('riskScatter3D', [scatter3DData], layout3D, { displayModeBar: false });
+};
+
+// 4. System Health Radar (Chart.js)
+// 4. System Health Radar (Attack Resilience & Risk Profile)
+window.updateRadarChart = function (logs) {
+    // Default categories ensure the chart has shape even without data
+    const defaultCategories = [
+        'jailbreak', 'injection', 'roleplay', 'social_engineering', 'obfuscation',
+        'urgency', 'boiling_frog', 'system_prompt', 'multi_stage', 'false_positive'
+    ];
+
+    // Initialize stats for all categories
+    const stats = {};
+    defaultCategories.forEach(cat => {
+        stats[cat] = { total: 0, blocked: 0, riskSum: 0 };
+    });
+
+    // Populate with actual log data
+    if (logs && logs.length > 0) {
+        logs.forEach(l => {
+            if (l.attack_type && defaultCategories.includes(l.attack_type)) {
+                stats[l.attack_type].total++;
+                stats[l.attack_type].riskSum += (l.risk_score || 0);
+                if (l.actual_decision === 'BLOCKED') stats[l.attack_type].blocked++;
+            }
+        });
+    }
+
+    const labels = defaultCategories.map(s => s.replace(/_/g, ' ').toUpperCase());
+
+    // Dataset 1: Defense Resilience (Block Rate %)
+    const defenseData = defaultCategories.map(cat => {
+        const s = stats[cat];
+        return s.total > 0 ? Math.round((s.blocked / s.total) * 100) : 0; // 0 if no attacks
+    });
+
+    // Dataset 2: Average Risk Intensity (0-100)
+    const riskData = defaultCategories.map(cat => {
+        const s = stats[cat];
+        return s.total > 0 ? Math.round(s.riskSum / s.total) : 0;
+    });
+
+    const radarData = {
+        labels: labels,
+        datasets: [
+            {
+                label: 'Defense Resilience (%)',
+                data: defenseData,
+                backgroundColor: 'rgba(0, 255, 136, 0.2)', // Neon Green fill
+                borderColor: '#00ff88',
+                pointBackgroundColor: '#00ff88',
+                pointBorderColor: '#fff',
+                borderWidth: 2,
+                pointRadius: 3
+            },
+            {
+                label: 'Avg Risk Intensity',
+                data: riskData,
+                backgroundColor: 'rgba(255, 51, 102, 0.1)', // Red fill (lighter)
+                borderColor: '#ff3366',
+                pointBackgroundColor: '#ff3366',
+                pointBorderColor: '#fff',
+                borderWidth: 2,
+                pointRadius: 3,
+                borderDash: [5, 5] // Dashed line for Risk to distinguish
+            }
+        ]
+    };
+
+    renderChart('healthRadarChart', 'radar', radarData, {
+        scales: {
+            r: {
+                angleLines: { color: 'rgba(255, 255, 255, 0.1)' },
+                grid: { color: 'rgba(255, 255, 255, 0.05)', circular: true },
+                pointLabels: {
+                    color: '#00ccff', // Cyan labels
+                    font: { family: 'Courier New', size: 11, weight: 'bold' },
+                    backdropColor: 'transparent'
+                },
+                suggestedMin: 0,
+                suggestedMax: 100,
+                ticks: {
+                    display: false, // Hide concentric numbers for cleaner look
+                    backdropColor: 'transparent'
+                }
+            }
+        },
+        plugins: {
+            legend: {
+                display: true,
+                labels: { color: '#fff', font: { family: 'Courier New' } }
+            },
+            tooltip: {
+                backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                titleColor: '#00ccff',
+                bodyColor: '#fff',
+                borderColor: '#333',
+                borderWidth: 1,
+                callbacks: {
+                    label: function (context) {
+                        return `${context.dataset.label}: ${context.raw}`;
+                    }
+                }
+            }
+        },
+        maintainAspectRatio: false
+    });
+};
+
+
+// 6. Risk Distribution (Histogram)
+function updateRiskDistChart(logs) {
+    const riskScores = logs.map(l => l.risk_score || 0);
+    const riskBuckets = new Array(10).fill(0);
+    riskScores.forEach(s => {
+        const idx = Math.min(Math.floor(s / 10), 9);
+        riskBuckets[idx]++;
+    });
+
+    renderChart('riskDistChart', 'bar', {
+        labels: ['0-10', '10-20', '20-30', '30-40', '40-50', '50-60', '60-70', '70-80', '80-90', '90-100'],
+        datasets: [{
+            label: 'Count',
+            data: riskBuckets,
+            backgroundColor: riskBuckets.map((_, i) => i > 7 ? '#ff3366' : '#00ff88')
+        }]
+    });
+}
+
+// 7. Confusion Matrix
+function renderConfusionMatrix(logs) {
+    // Basic logic if not present
+    const tp = logs.filter(l => l.expected_label === 'MALICIOUS' && l.actual_decision === 'BLOCKED').length;
+    const tn = logs.filter(l => l.expected_label === 'BENIGN' && l.actual_decision === 'ALLOWED').length;
+    const fp = logs.filter(l => l.expected_label === 'BENIGN' && l.actual_decision === 'BLOCKED').length;
+    const fn = logs.filter(l => l.expected_label === 'MALICIOUS' && l.actual_decision === 'ALLOWED').length;
+
+    const data = [{
+        z: [[tn, fp], [fn, tp]],
+        x: ['Allowed', 'Blocked'],
+        y: ['Benign', 'Malicious'],
+        type: 'heatmap',
+        colorscale: 'Viridis',
+        showscale: false
+    }];
+
+    const layout = {
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#fff' },
+        margin: { t: 20, b: 20, l: 40, r: 20 },
+        autosize: true
+    };
+
+    Plotly.newPlot('confusionMatrixContainer', data, layout, { displayModeBar: false });
+}
+
+
+function renderTable(logs) {
+    const tbody = document.querySelector('#logsTable tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    if (!logs || logs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px; color: #666;">No recent activity</td></tr>';
+        return;
+    }
+
+    // Show last 50
+    const recent = logs.slice().reverse().slice(0, 50);
+
+    recent.forEach(log => {
+        const row = document.createElement('tr');
+
+        const time = new Date(log.timestamp).toLocaleTimeString();
+        // Safe access to prompt
+        const promptText = log.prompt || "[No Prompt]";
+        const promptShort = promptText.length > 30 ? promptText.substring(0, 30) + '...' : promptText;
+        const riskScore = log.risk_score !== undefined ? log.risk_score : 0;
+        const decision = log.actual_decision || "UNKNOWN";
+
+        const riskClass = riskScore > 80 ? 'sc-high' : (riskScore > 40 ? 'sc-med' : 'sc-low');
+        const decisionBadge = decision === 'BLOCKED' ? 'badge badge-blocked' : 'badge badge-allowed';
+        const statusIcon = log.correct ? '<i class="fa-solid fa-check" style="color: #00ff88;"></i>' : '<i class="fa-solid fa-xmark" style="color: #ff3366;"></i>';
+
+        row.innerHTML = `
+            <td><span class="mono">${time}</span></td>
+            <td title="${promptText.replace(/"/g, '&quot;')}">${promptShort}</td>
+            <td><span class="${riskClass}">${riskScore}</span></td>
+            <td><span class="${decisionBadge}">${decision}</span></td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+
+
+// Global filter state
+window.currentRiskFilter = 'ALL';
+
+function renderBlockedTable(logs) {
+    const tbody = document.querySelector('#blockedTable tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    // Start with ALL logs (not just blocked)
+    let threats = logs;
+
+    // Apply Logic:
+    // If Filter is ALL: Show BLOCKED only (classic behavior)
+    // If Filter is HIGH/MED/LOW: Show Everything in that range (Blocked OR Allowed)
+
+    if (window.currentRiskFilter === 'ALL') {
+        threats = threats.filter(l => l.actual_decision === 'BLOCKED');
+    } else {
+        threats = threats.filter(l => {
+            const score = l.risk_score || 0;
+            if (window.currentRiskFilter === 'HIGH') return score >= 80;
+            if (window.currentRiskFilter === 'MEDIUM') return score >= 40 && score < 80;
+            if (window.currentRiskFilter === 'LOW') return score < 40;
+            return true;
+        });
+    }
+
+    // Sort by Risk Score (Descending)
+    threats = threats.sort((a, b) => b.risk_score - a.risk_score).slice(0, 50);
+
+    if (threats.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px; color: #666;">No threats matching filter</td></tr>';
+        return;
+    }
+
+    threats.forEach(log => {
+        const row = document.createElement('tr');
+        const time = new Date(log.timestamp).toLocaleTimeString();
+        const promptText = log.prompt || "[No Prompt]";
+        const promptShort = promptText.length > 30 ? promptText.substring(0, 30) + '...' : promptText;
+
+        // Visual indicator for Allowed but Risky
+        const decisionClass = log.actual_decision === 'BLOCKED' ? 'sc-high' : 'sc-low'; // Color code risk
+        const rowStyle = log.actual_decision === 'ALLOWED' && (log.risk_score || 0) > 40 ? 'color: #ffcc00;' : '';
+
+        row.innerHTML = `
+            <td><span class="mono">${time}</span></td>
+            <td title="${promptText.replace(/"/g, '&quot;')}">${promptShort}</td>
+            <td><span class="${log.risk_score > 50 ? 'sc-high' : 'sc-med'}" style="${rowStyle}">${log.risk_score}</span></td>
+            <td class="mono">${log.actual_decision}</td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function renderChart(id, type, data, options = {}) {
+    const ctx = document.getElementById(id).getContext('2d');
+
+    // Common defaults
+    const defaultOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { labels: { color: '#e0e0e0', font: { family: 'Courier New' } } },
+            tooltip: {
+                mode: 'index',
+                intersect: false,
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                titleColor: '#00ff88',
+                bodyColor: '#fff',
+                borderColor: '#333',
+                borderWidth: 1
+            }
+        },
+        scales: {
+            x: {
+                ticks: { color: '#888', font: { family: 'Courier New' } },
+                grid: { color: 'rgba(255, 255, 255, 0.05)' }
+            },
+            y: {
+                ticks: { color: '#888', font: { family: 'Courier New' } },
+                grid: { color: 'rgba(255, 255, 255, 0.05)' }
+            }
+        },
+        interaction: {
+            mode: 'nearest',
+            axis: 'x',
+            intersect: false
+        }
+    };
+
+    // Deep merge options helper or just simplistic override for now to avoid recursion
+    // The previous spread ...options.scales?.x etc caused issues if structure mismatch
+    // simpler merge:
+    const finalOptions = {
+        ...defaultOptions,
+        ...options,
+        scales: {
+            x: { ...defaultOptions.scales.x, ...(options.scales?.x || {}) },
+            y: { ...defaultOptions.scales.y, ...(options.scales?.y || {}) }
+        },
+        plugins: {
+            ...defaultOptions.plugins,
+            ...(options.plugins || {})
+        }
+    };
+
+    if (charts[id]) {
+        charts[id].data = data;
+        charts[id].options = finalOptions;
+        charts[id].update();
+    } else {
+        charts[id] = new Chart(ctx, {
+            type: type,
+            data: data,
+            options: finalOptions
+        });
+    }
+}
+
+function renderConfusionMatrix(logs) {
+    // TP: Malicious and Blocked
+    // TN: Benign and Allowed
+    // FP: Benign and Blocked
+    // FN: Malicious and Allowed
+
+    let tp = 0, tn = 0, fp = 0, fn = 0;
+
+    logs.forEach(l => {
+        const expected = l.expected_label;
+        const decision = l.actual_decision;
+
+        if (expected === 'MALICIOUS' && decision === 'BLOCKED') tp++;
+        else if (expected === 'BENIGN' && decision === 'ALLOWED') tn++;
+        else if (expected === 'BENIGN' && decision === 'BLOCKED') fp++;
+        else if (expected === 'MALICIOUS' && decision === 'ALLOWED') fn++;
+    });
+
+    const data = [
+        {
+            z: [[tn, fp], [fn, tp]],
+            x: ['Allowed', 'Blocked'],
+            y: ['Benign', 'Malicious'],
+            type: 'heatmap',
+            colorscale: [
+                [0, '#0d0d0d'],
+                [0.5, '#0077be'],
+                [1, '#00ff88']
+            ],
+            font: { color: '#fff' }
+        }
+    ];
+
+    const layout = {
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#e0e0e0', family: 'Courier New' },
+        margin: { t: 30, l: 60, r: 30, b: 30 },
+        height: 300,
+        xaxis: { title: 'Actual Decision' },
+        yaxis: { title: 'Expected Label' }
+    };
+    Plotly.newPlot('confusionMatrixContainer', data, layout, { displayModeBar: false });
+}
+
+// ===== ANTIBODY BREAKDOWN TABLE =====
+function renderAntibodyTable(logs, antibodies) {
+    const tbody = document.querySelector('#antibodyTable tbody');
+    if (!tbody) return;
+
+    console.log('[Antibody Table] Received logs:', logs ? logs.length : 0);
+    console.log('[Antibody Table] Received antibodies:', antibodies);
+
+    // Check if antibodies exist
+    if (!antibodies || !antibodies.labels || !antibodies.patterns) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No antibody data</td></tr>';
+        return;
+    }
+
+    const labels = antibodies.labels || [];
+    const patterns = antibodies.patterns || [];
+
+    if (labels.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No antibodies created yet</td></tr>';
+        return;
+    }
+
+    console.log('[Antibody Table] Total antibodies:', labels.length);
+
+    // Display antibodies in reverse order (most recent first)
+    const rows = [];
+    for (let i = labels.length - 1; i >= 0; i--) {
+        const label = labels[i];
+        const pattern = patterns[i] || 'N/A';
+
+        // Extract attack type from label
+        let attackType = 'Unknown';
+        if (label.startsWith('SAFE:')) {
+            attackType = 'Safe Pattern';
+        } else if (label.includes('supervised_')) {
+            attackType = 'Supervised Learning';
+        } else {
+            attackType = label.replace('Antibody for ', '');
+        }
+
+        // Color code: Green for safe patterns, Red for attack patterns
+        const patternColor = attackType === 'Safe Pattern' ? '#00ff88' : '#e74c3c';
+
+        rows.push(`
+            <tr>
+                <td>${attackType}</td>
+                <td style="color: ${patternColor}; font-weight: 500;">${pattern}</td>
+                <td style="font-family: monospace; font-size: 0.85em;">Pattern-based antibody</td>
+                <td>Auto-generated</td>
+            </tr>
+        `);
+    }
+
+    tbody.innerHTML = rows.join('');
+}
+/ /   P D F   E x p o r t   F u n c t i o n a l i t y   f o r   A E G I S   V   D a s h b o a r d 
+ 
+ / /   A d d   t h i s   a t   t h e   e n d   o f   d a s h b o a r d . j s 
+ 
+ 
+ 
+ / /   P D F   G e n e r a t i o n   F u n c t i o n 
+ 
+ a s y n c   f u n c t i o n   g e n e r a t e P D F R e p o r t ( )   { 
+ 
+         c o n s t   b u t t o n   =   d o c u m e n t . g e t E l e m e n t B y I d ( ' d o w n l o a d P d f B t n ' ) ; 
+ 
+         c o n s t   o r i g i n a l T e x t   =   b u t t o n . i n n e r H T M L ; 
+ 
+ 
+ 
+         t r y   { 
+ 
+                 / /   S h o w   l o a d i n g   s t a t e 
+ 
+                 b u t t o n . i n n e r H T M L   =   ' < i   c l a s s = " f a - s o l i d   f a - s p i n n e r   f a - s p i n " > < / i >   G e n e r a t i n g   P D F . . . ' ; 
+ 
+                 b u t t o n . d i s a b l e d   =   t r u e ; 
+ 
+ 
+ 
+                 / /   I n i t i a l i z e   j s P D F 
+ 
+                 c o n s t   {   j s P D F   }   =   w i n d o w . j s p d f ; 
+ 
+                 c o n s t   p d f   =   n e w   j s P D F ( ' p ' ,   ' m m ' ,   ' a 4 ' ) ; 
+ 
+                 c o n s t   p a g e W i d t h   =   p d f . i n t e r n a l . p a g e S i z e . g e t W i d t h ( ) ; 
+ 
+                 c o n s t   p a g e H e i g h t   =   p d f . i n t e r n a l . p a g e S i z e . g e t H e i g h t ( ) ; 
+ 
+                 l e t   y P o s i t i o n   =   2 0 ; 
+ 
+ 
+ 
+                 / /   = = =   P A G E   1 :   T I T L E   A N D   S U M M A R Y   = = = 
+ 
+                 / /   T i t l e 
+ 
+                 p d f . s e t F o n t S i z e ( 2 4 ) ; 
+ 
+                 p d f . s e t T e x t C o l o r ( 0 ,   2 5 5 ,   1 3 6 ) ; 
+ 
+                 p d f . t e x t ( ' A E G I S   V   S e c u r i t y   D a s h b o a r d ' ,   p a g e W i d t h   /   2 ,   y P o s i t i o n ,   {   a l i g n :   ' c e n t e r '   } ) ; 
+ 
+ 
+ 
+                 y P o s i t i o n   + =   1 0 ; 
+ 
+                 p d f . s e t F o n t S i z e ( 1 0 ) ; 
+ 
+                 p d f . s e t T e x t C o l o r ( 1 5 0 ,   1 5 0 ,   1 5 0 ) ; 
+ 
+                 p d f . t e x t ( ` G e n e r a t e d :   $ { n e w   D a t e ( ) . t o L o c a l e S t r i n g ( ) } ` ,   p a g e W i d t h   /   2 ,   y P o s i t i o n ,   {   a l i g n :   ' c e n t e r '   } ) ; 
+ 
+ 
+ 
+                 y P o s i t i o n   + =   1 5 ; 
+ 
+                 p d f . s e t D r a w C o l o r ( 0 ,   2 5 5 ,   1 3 6 ) ; 
+ 
+                 p d f . l i n e ( 2 0 ,   y P o s i t i o n ,   p a g e W i d t h   -   2 0 ,   y P o s i t i o n ) ; 
+ 
+ 
+ 
+                 / /   S u m m a r y   S t a t i s t i c s 
+ 
+                 y P o s i t i o n   + =   1 0 ; 
+ 
+                 p d f . s e t F o n t S i z e ( 1 6 ) ; 
+ 
+                 p d f . s e t T e x t C o l o r ( 0 ,   2 5 5 ,   1 3 6 ) ; 
+ 
+                 p d f . t e x t ( ' S y s t e m   O v e r v i e w ' ,   2 0 ,   y P o s i t i o n ) ; 
+ 
+ 
+ 
+                 y P o s i t i o n   + =   1 0 ; 
+ 
+                 p d f . s e t F o n t S i z e ( 1 1 ) ; 
+ 
+                 p d f . s e t T e x t C o l o r ( 2 0 0 ,   2 0 0 ,   2 0 0 ) ; 
+ 
+ 
+ 
+                 c o n s t   s t a t s   =   [ 
+ 
+                         ` T o t a l   R e q u e s t s :   $ { d o c u m e n t . g e t E l e m e n t B y I d ( ' t o t a l R e q u e s t s ' ) . i n n e r T e x t } ` , 
+ 
+                         ` T h r e a t s   B l o c k e d :   $ { d o c u m e n t . g e t E l e m e n t B y I d ( ' t o t a l B l o c k e d ' ) . i n n e r T e x t } ` , 
+ 
+                         ` S y s t e m   A c c u r a c y :   $ { d o c u m e n t . g e t E l e m e n t B y I d ( ' a c c u r a c y S t a t ' ) . i n n e r T e x t } ` , 
+ 
+                         ` A v e r a g e   L a t e n c y :   $ { d o c u m e n t . g e t E l e m e n t B y I d ( ' a v g L a t e n c y ' ) . i n n e r T e x t } ` , 
+ 
+                         ` T o t a l   A n t i b o d i e s :   $ { d o c u m e n t . g e t E l e m e n t B y I d ( ' t o t a l A n t i b o d i e s ' ) . i n n e r T e x t } ` 
+ 
+                 ] ; 
+ 
+ 
+ 
+                 s t a t s . f o r E a c h ( s t a t   = >   { 
+ 
+                         p d f . t e x t ( s t a t ,   2 5 ,   y P o s i t i o n ) ; 
+ 
+                         y P o s i t i o n   + =   7 ; 
+ 
+                 } ) ; 
+ 
+ 
+ 
+                 / /   = = =   C H A R T S   ( C a p t u r e   a s   i m a g e s )   = = = 
+ 
+                 y P o s i t i o n   + =   1 0 ; 
+ 
+ 
+ 
+                 / /   C a p t u r e   T r a f f i c   C h a r t 
+ 
+                 c o n s t   t r a f f i c C a n v a s   =   d o c u m e n t . g e t E l e m e n t B y I d ( ' t r a f f i c C h a r t ' ) ; 
+ 
+                 i f   ( t r a f f i c C a n v a s )   { 
+ 
+                         c o n s t   t r a f f i c I m g   =   t r a f f i c C a n v a s . t o D a t a U R L ( ' i m a g e / p n g ' ) ; 
+ 
+                         p d f . a d d P a g e ( ) ; 
+ 
+                         p d f . s e t F o n t S i z e ( 1 4 ) ; 
+ 
+                         p d f . s e t T e x t C o l o r ( 0 ,   2 5 5 ,   1 3 6 ) ; 
+ 
+                         p d f . t e x t ( ' R e q u e s t   T r a f f i c   P a t t e r n ' ,   2 0 ,   2 0 ) ; 
+ 
+                         p d f . a d d I m a g e ( t r a f f i c I m g ,   ' P N G ' ,   2 0 ,   3 0 ,   1 7 0 ,   8 0 ) ; 
+ 
+                 } 
+ 
+ 
+ 
+                 / /   C a p t u r e   A t t a c k   D i s t r i b u t i o n   C h a r t 
+ 
+                 c o n s t   a t t a c k D i s t C a n v a s   =   d o c u m e n t . g e t E l e m e n t B y I d ( ' a t t a c k D i s t C h a r t ' ) ; 
+ 
+                 i f   ( a t t a c k D i s t C a n v a s )   { 
+ 
+                         c o n s t   a t t a c k I m g   =   a t t a c k D i s t C a n v a s . t o D a t a U R L ( ' i m a g e / p n g ' ) ; 
+ 
+                         p d f . s e t F o n t S i z e ( 1 4 ) ; 
+ 
+                         p d f . t e x t ( ' A t t a c k   D i s t r i b u t i o n ' ,   2 0 ,   1 2 0 ) ; 
+ 
+                         p d f . a d d I m a g e ( a t t a c k I m g ,   ' P N G ' ,   6 0 ,   1 3 0 ,   9 0 ,   9 0 ) ; 
+ 
+                 } 
+ 
+ 
+ 
+                 / /   = = =   A N T I B O D Y   B R E A K D O W N   T A B L E   = = = 
+ 
+                 p d f . a d d P a g e ( ) ; 
+ 
+                 p d f . s e t F o n t S i z e ( 1 6 ) ; 
+ 
+                 p d f . s e t T e x t C o l o r ( 0 ,   2 5 5 ,   1 3 6 ) ; 
+ 
+                 p d f . t e x t ( ' A n t i b o d y   B r e a k d o w n   ( L e a r n e d   D e f e n s e s ) ' ,   2 0 ,   2 0 ) ; 
+ 
+ 
+ 
+                 / /   G e t   t a b l e   d a t a 
+ 
+                 c o n s t   a n t i b o d y T a b l e   =   d o c u m e n t . g e t E l e m e n t B y I d ( ' a n t i b o d y T a b l e ' ) ; 
+ 
+                 c o n s t   r o w s   =   a n t i b o d y T a b l e . q u e r y S e l e c t o r A l l ( ' t b o d y   t r ' ) ; 
+ 
+ 
+ 
+                 y P o s i t i o n   =   3 0 ; 
+ 
+                 p d f . s e t F o n t S i z e ( 1 0 ) ; 
+ 
+                 p d f . s e t T e x t C o l o r ( 2 0 0 ,   2 0 0 ,   2 0 0 ) ; 
+ 
+ 
+ 
+                 / /   T a b l e   h e a d e r s 
+ 
+                 p d f . s e t F o n t ( u n d e f i n e d ,   ' b o l d ' ) ; 
+ 
+                 p d f . t e x t ( ' A t t a c k   T y p e ' ,   2 0 ,   y P o s i t i o n ) ; 
+ 
+                 p d f . t e x t ( ' L e a r n e d   P a t t e r n s ' ,   7 0 ,   y P o s i t i o n ) ; 
+ 
+                 p d f . s e t F o n t ( u n d e f i n e d ,   ' n o r m a l ' ) ; 
+ 
+ 
+ 
+                 y P o s i t i o n   + =   7 ; 
+ 
+                 p d f . s e t D r a w C o l o r ( 0 ,   2 5 5 ,   1 3 6 ) ; 
+ 
+                 p d f . l i n e ( 2 0 ,   y P o s i t i o n ,   p a g e W i d t h   -   2 0 ,   y P o s i t i o n ) ; 
+ 
+                 y P o s i t i o n   + =   5 ; 
+ 
+ 
+ 
+                 / /   T a b l e   r o w s   ( l i m i t   t o   f i r s t   3 0   t o   f i t   o n   p a g e s ) 
+ 
+                 l e t   r o w C o u n t   =   0 ; 
+ 
+                 r o w s . f o r E a c h ( ( r o w ,   i n d e x )   = >   { 
+ 
+                         i f   ( r o w C o u n t   > =   3 0 )   r e t u r n ; 
+ 
+ 
+ 
+                         c o n s t   c e l l s   =   r o w . q u e r y S e l e c t o r A l l ( ' t d ' ) ; 
+ 
+                         i f   ( c e l l s . l e n g t h   > =   2 )   { 
+ 
+                                 c o n s t   a t t a c k T y p e   =   c e l l s [ 0 ] . i n n e r T e x t . s u b s t r i n g ( 0 ,   2 5 ) ; 
+ 
+                                 c o n s t   p a t t e r n s   =   c e l l s [ 1 ] . i n n e r T e x t . s u b s t r i n g ( 0 ,   6 0 ) ; 
+ 
+ 
+ 
+                                 p d f . s e t F o n t S i z e ( 9 ) ; 
+ 
+                                 p d f . t e x t ( a t t a c k T y p e ,   2 0 ,   y P o s i t i o n ) ; 
+ 
+                                 p d f . s e t F o n t S i z e ( 8 ) ; 
+ 
+                                 p d f . t e x t ( p a t t e r n s ,   7 0 ,   y P o s i t i o n ) ; 
+ 
+ 
+ 
+                                 y P o s i t i o n   + =   6 ; 
+ 
+                                 r o w C o u n t + + ; 
+ 
+ 
+ 
+                                 / /   A d d   n e w   p a g e   i f   n e e d e d 
+ 
+                                 i f   ( y P o s i t i o n   >   p a g e H e i g h t   -   2 0 )   { 
+ 
+                                         p d f . a d d P a g e ( ) ; 
+ 
+                                         y P o s i t i o n   =   2 0 ; 
+ 
+                                         p d f . s e t F o n t S i z e ( 1 0 ) ; 
+ 
+                                         p d f . s e t T e x t C o l o r ( 0 ,   2 5 5 ,   1 3 6 ) ; 
+ 
+                                         p d f . t e x t ( ' A n t i b o d y   B r e a k d o w n   ( c o n t i n u e d ) ' ,   2 0 ,   y P o s i t i o n ) ; 
+ 
+                                         y P o s i t i o n   + =   1 0 ; 
+ 
+                                         p d f . s e t T e x t C o l o r ( 2 0 0 ,   2 0 0 ,   2 0 0 ) ; 
+ 
+                                 } 
+ 
+                         } 
+ 
+                 } ) ; 
+ 
+ 
+ 
+                 / /   = = =   R E C E N T   A C T I V I T Y   T A B L E   = = = 
+ 
+                 p d f . a d d P a g e ( ) ; 
+ 
+                 p d f . s e t F o n t S i z e ( 1 6 ) ; 
+ 
+                 p d f . s e t T e x t C o l o r ( 0 ,   2 5 5 ,   1 3 6 ) ; 
+ 
+                 p d f . t e x t ( ' R e c e n t   A c t i v i t y   L o g ' ,   2 0 ,   2 0 ) ; 
+ 
+ 
+ 
+                 c o n s t   l o g s T a b l e   =   d o c u m e n t . g e t E l e m e n t B y I d ( ' l o g s T a b l e ' ) ; 
+ 
+                 c o n s t   l o g R o w s   =   l o g s T a b l e . q u e r y S e l e c t o r A l l ( ' t b o d y   t r ' ) ; 
+ 
+ 
+ 
+                 y P o s i t i o n   =   3 0 ; 
+ 
+                 p d f . s e t F o n t S i z e ( 9 ) ; 
+ 
+                 p d f . s e t F o n t ( u n d e f i n e d ,   ' b o l d ' ) ; 
+ 
+                 p d f . t e x t ( ' T i m e ' ,   2 0 ,   y P o s i t i o n ) ; 
+ 
+                 p d f . t e x t ( ' P r o m p t ' ,   4 5 ,   y P o s i t i o n ) ; 
+ 
+                 p d f . t e x t ( ' R i s k ' ,   1 3 0 ,   y P o s i t i o n ) ; 
+ 
+                 p d f . t e x t ( ' D e c i s i o n ' ,   1 5 0 ,   y P o s i t i o n ) ; 
+ 
+                 p d f . s e t F o n t ( u n d e f i n e d ,   ' n o r m a l ' ) ; 
+ 
+ 
+ 
+                 y P o s i t i o n   + =   5 ; 
+ 
+                 p d f . s e t D r a w C o l o r ( 0 ,   2 5 5 ,   1 3 6 ) ; 
+ 
+                 p d f . l i n e ( 2 0 ,   y P o s i t i o n ,   p a g e W i d t h   -   2 0 ,   y P o s i t i o n ) ; 
+ 
+                 y P o s i t i o n   + =   5 ; 
+ 
+ 
+ 
+                 / /   L o g   r o w s 
+ 
+                 l e t   l o g C o u n t   =   0 ; 
+ 
+                 l o g R o w s . f o r E a c h ( ( r o w )   = >   { 
+ 
+                         i f   ( l o g C o u n t   > =   3 5 )   r e t u r n ; 
+ 
+ 
+ 
+                         c o n s t   c e l l s   =   r o w . q u e r y S e l e c t o r A l l ( ' t d ' ) ; 
+ 
+                         i f   ( c e l l s . l e n g t h   > =   4 )   { 
+ 
+                                 p d f . s e t F o n t S i z e ( 7 ) ; 
+ 
+                                 p d f . s e t T e x t C o l o r ( 1 8 0 ,   1 8 0 ,   1 8 0 ) ; 
+ 
+                                 p d f . t e x t ( c e l l s [ 0 ] . i n n e r T e x t ,   2 0 ,   y P o s i t i o n ) ; 
+ 
+                                 p d f . t e x t ( c e l l s [ 1 ] . i n n e r T e x t . s u b s t r i n g ( 0 ,   4 0 ) ,   4 5 ,   y P o s i t i o n ) ; 
+ 
+                                 p d f . t e x t ( c e l l s [ 2 ] . i n n e r T e x t ,   1 3 0 ,   y P o s i t i o n ) ; 
+ 
+ 
+ 
+                                 / /   C o l o r   c o d e   d e c i s i o n 
+ 
+                                 c o n s t   d e c i s i o n   =   c e l l s [ 3 ] . i n n e r T e x t ; 
+ 
+                                 i f   ( d e c i s i o n . i n c l u d e s ( ' B L O C K E D ' ) )   { 
+ 
+                                         p d f . s e t T e x t C o l o r ( 2 5 5 ,   5 1 ,   1 0 2 ) ; 
+ 
+                                 }   e l s e   { 
+ 
+                                         p d f . s e t T e x t C o l o r ( 0 ,   2 5 5 ,   1 3 6 ) ; 
+ 
+                                 } 
+ 
+                                 p d f . t e x t ( d e c i s i o n ,   1 5 0 ,   y P o s i t i o n ) ; 
+ 
+                                 p d f . s e t T e x t C o l o r ( 1 8 0 ,   1 8 0 ,   1 8 0 ) ; 
+ 
+ 
+ 
+                                 y P o s i t i o n   + =   5 ; 
+ 
+                                 l o g C o u n t + + ; 
+ 
+ 
+ 
+                                 i f   ( y P o s i t i o n   >   p a g e H e i g h t   -   1 5 )   { 
+ 
+                                         p d f . a d d P a g e ( ) ; 
+ 
+                                         y P o s i t i o n   =   2 0 ; 
+ 
+                                 } 
+ 
+                         } 
+ 
+                 } ) ; 
+ 
+ 
+ 
+                 / /   = = =   F O O T E R   O N   L A S T   P A G E   = = = 
+ 
+                 c o n s t   t o t a l P a g e s   =   p d f . i n t e r n a l . g e t N u m b e r O f P a g e s ( ) ; 
+ 
+                 p d f . s e t P a g e ( t o t a l P a g e s ) ; 
+ 
+                 p d f . s e t F o n t S i z e ( 8 ) ; 
+ 
+                 p d f . s e t T e x t C o l o r ( 1 0 0 ,   1 0 0 ,   1 0 0 ) ; 
+ 
+                 p d f . t e x t ( ' A E G I S   V   -   A d a p t i v e   I m m u n e   D e f e n s e   S y s t e m ' ,   p a g e W i d t h   /   2 ,   p a g e H e i g h t   -   1 0 ,   {   a l i g n :   ' c e n t e r '   } ) ; 
+ 
+ 
+ 
+                 / /   S a v e   P D F 
+ 
+                 c o n s t   t i m e s t a m p   =   n e w   D a t e ( ) . t o I S O S t r i n g ( ) . r e p l a c e ( / [ : . ] / g ,   ' - ' ) . s l i c e ( 0 ,   - 5 ) ; 
+ 
+                 p d f . s a v e ( ` A E G I S - V - R e p o r t - $ { t i m e s t a m p } . p d f ` ) ; 
+ 
+ 
+ 
+                 / /   S u c c e s s   m e s s a g e 
+ 
+                 s h o w S u c c e s s ( ' P D F   R e p o r t   D o w n l o a d e d   S u c c e s s f u l l y ! ' ) ; 
+ 
+ 
+ 
+         }   c a t c h   ( e r r o r )   { 
+ 
+                 c o n s o l e . e r r o r ( ' P D F   G e n e r a t i o n   E r r o r : ' ,   e r r o r ) ; 
+ 
+                 s h o w E r r o r ( ` P D F   G e n e r a t i o n   F a i l e d :   $ { e r r o r . m e s s a g e } ` ) ; 
+ 
+         }   f i n a l l y   { 
+ 
+                 / /   R e s t o r e   b u t t o n 
+ 
+                 b u t t o n . i n n e r H T M L   =   o r i g i n a l T e x t ; 
+ 
+                 b u t t o n . d i s a b l e d   =   f a l s e ; 
+ 
+         } 
+ 
+ } 
+ 
+ 
+ 
+ / /   S u c c e s s   n o t i f i c a t i o n   f u n c t i o n 
+ 
+ f u n c t i o n   s h o w S u c c e s s ( m s g )   { 
+ 
+         c o n s t   s u c c e s s D i v   =   d o c u m e n t . c r e a t e E l e m e n t ( ' d i v ' ) ; 
+ 
+         s u c c e s s D i v . s t y l e . c s s T e x t   =   ' p o s i t i o n : f i x e d ;   t o p : 2 0 p x ;   l e f t : 5 0 % ;   t r a n s f o r m : t r a n s l a t e X ( - 5 0 % ) ;   b a c k g r o u n d : r g b a ( 0 ,   2 5 5 ,   1 3 6 ,   0 . 9 ) ;   c o l o r : # 0 a 0 a 0 a ;   p a d d i n g : 1 5 p x   3 0 p x ;   b o r d e r - r a d i u s : 8 p x ;   z - i n d e x : 9 9 9 9 ;   f o n t - f a m i l y : " C o u r i e r   N e w " ;   f o n t - w e i g h t : b o l d ;   b o x - s h a d o w : 0   0   2 0 p x   r g b a ( 0 , 2 5 5 , 1 3 6 , 0 . 5 ) ; ' ; 
+ 
+         s u c c e s s D i v . i n n e r H T M L   =   ` < i   c l a s s = " f a - s o l i d   f a - c h e c k - c i r c l e " > < / i >   $ { m s g } ` ; 
+ 
+         d o c u m e n t . b o d y . a p p e n d C h i l d ( s u c c e s s D i v ) ; 
+ 
+         s e t T i m e o u t ( ( )   = >   s u c c e s s D i v . r e m o v e ( ) ,   4 0 0 0 ) ; 
+ 
+ } 
+ 
+ 
+ 
+ / /   A d d   e v e n t   l i s t e n e r   w h e n   D O M   i s   l o a d e d 
+ 
+ d o c u m e n t . a d d E v e n t L i s t e n e r ( ' D O M C o n t e n t L o a d e d ' ,   ( )   = >   { 
+ 
+         c o n s t   d o w n l o a d B t n   =   d o c u m e n t . g e t E l e m e n t B y I d ( ' d o w n l o a d P d f B t n ' ) ; 
+ 
+         i f   ( d o w n l o a d B t n )   { 
+ 
+                 d o w n l o a d B t n . a d d E v e n t L i s t e n e r ( ' c l i c k ' ,   g e n e r a t e P D F R e p o r t ) ; 
+ 
+         } 
+ 
+ } ) ; 
+ 
+ 
